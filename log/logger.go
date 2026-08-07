@@ -124,25 +124,19 @@ func formatSource(source *slog.Source, maxParts int) string {
 	return fmt.Sprintf("%s:%d", trimmedPath, source.Line)
 }
 
-func replaceAttrUTC(_ []string, a slog.Attr, maxParts int) slog.Attr {
+func (c *LogConfig) replaceAttr(_ []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.TimeKey {
-		a.Value = slog.StringValue(a.Value.Time().UTC().Format(customTimeLayout))
-	}
-	if a.Key == slog.SourceKey {
-		if source, ok := a.Value.Any().(*slog.Source); ok && source != nil {
-			a.Value = slog.StringValue(formatSource(source, maxParts))
+		t := a.Value.Time()
+		if c.TimeZone == OutputTimeZoneLocal {
+			t = t.Local()
+		} else {
+			t = t.UTC()
 		}
-	}
-	return a
-}
-
-func replaceAttrLocal(_ []string, a slog.Attr, maxParts int) slog.Attr {
-	if a.Key == slog.TimeKey {
-		a.Value = slog.StringValue(a.Value.Time().Local().Format(customTimeLayout))
+		a.Value = slog.StringValue(t.Format(customTimeLayout))
 	}
 	if a.Key == slog.SourceKey {
 		if source, ok := a.Value.Any().(*slog.Source); ok && source != nil {
-			a.Value = slog.StringValue(formatSource(source, maxParts))
+			a.Value = slog.StringValue(formatSource(source, c.MaxParts))
 		}
 	}
 	return a
@@ -161,32 +155,14 @@ func getLevel(level string) slog.Level {
 	}
 }
 
-func getReplaceAttrFunc(config *LogConfig) func([]string, slog.Attr) slog.Attr {
-	maxParts := config.MaxParts
-	if maxParts <= 0 {
-		maxParts = 2
-	}
-	switch config.TimeZone {
-	case OutputTimeZoneUTC:
-		return func(groups []string, a slog.Attr) slog.Attr {
-			return replaceAttrUTC(groups, a, maxParts)
-		}
-	case OutputTimeZoneLocal:
-		return func(groups []string, a slog.Attr) slog.Attr {
-			return replaceAttrLocal(groups, a, maxParts)
-		}
-	default:
-		return func(groups []string, a slog.Attr) slog.Attr {
-			return replaceAttrUTC(groups, a, maxParts)
-		}
-	}
-}
-
 func getHandler(config *LogConfig) slog.Handler {
+	if config == nil {
+		config = &LogConfig{}
+	}
 	options := slog.HandlerOptions{
 		AddSource:   true,
 		Level:       getLevel(config.Level),
-		ReplaceAttr: getReplaceAttrFunc(config),
+		ReplaceAttr: config.replaceAttr,
 	}
 	switch config.OutputType {
 	case OutputTypeJSON:

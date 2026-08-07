@@ -62,25 +62,6 @@ func TestGetLevel(t *testing.T) {
 	}
 }
 
-func TestGetReplaceAttrFunc(t *testing.T) {
-	strAttr := slog.String("key", "val")
-
-	fnUTC := getReplaceAttrFunc(&LogConfig{TimeZone: OutputTimeZoneUTC, MaxParts: 4})
-	if fnUTC == nil || fnUTC(nil, strAttr).Key != "key" {
-		t.Error("expected non-nil working replaceAttr function for UTC")
-	}
-
-	fnLocal := getReplaceAttrFunc(&LogConfig{TimeZone: OutputTimeZoneLocal, MaxParts: 4})
-	if fnLocal == nil || fnLocal(nil, strAttr).Key != "key" {
-		t.Error("expected non-nil working replaceAttr function for Local")
-	}
-
-	fnDefault := getReplaceAttrFunc(&LogConfig{TimeZone: OutputTimeZone(999)})
-	if fnDefault == nil || fnDefault(nil, strAttr).Key != "key" {
-		t.Error("expected non-nil working replaceAttr function for default")
-	}
-}
-
 func TestFormatSource(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -169,39 +150,42 @@ func TestReplaceAttr(t *testing.T) {
 		Line: 229,
 	})
 
+	cfgUTC := &LogConfig{TimeZone: OutputTimeZoneUTC, MaxParts: 4}
+	cfgLocal := &LogConfig{TimeZone: OutputTimeZoneLocal, MaxParts: 4}
+
 	// Test UTC replaceAttr
-	resUTC := replaceAttrUTC(nil, timeAttr, 4)
+	resUTC := cfgUTC.replaceAttr(nil, timeAttr)
 	expectedUTCStr := testTime.UTC().Format(customTimeLayout)
 	if resUTC.Value.String() != expectedUTCStr {
-		t.Errorf("replaceAttrUTC time = %s, want %s", resUTC.Value.String(), expectedUTCStr)
+		t.Errorf("replaceAttr UTC time = %s, want %s", resUTC.Value.String(), expectedUTCStr)
 	}
 
-	resUTCStr := replaceAttrUTC(nil, strAttr, 4)
+	resUTCStr := cfgUTC.replaceAttr(nil, strAttr)
 	if resUTCStr.Key != "key" || resUTCStr.Value.String() != "val" {
-		t.Errorf("replaceAttrUTC non-time attr modified: %v", resUTCStr)
+		t.Errorf("replaceAttr non-time attr modified: %v", resUTCStr)
 	}
 
-	resUTCSrc := replaceAttrUTC(nil, srcAttr, 4)
+	resUTCSrc := cfgUTC.replaceAttr(nil, srcAttr)
 	expectedSrcStr := "/log/logger_test.go:229"
 	if resUTCSrc.Value.String() != expectedSrcStr {
-		t.Errorf("replaceAttrUTC source = %s, want %s", resUTCSrc.Value.String(), expectedSrcStr)
+		t.Errorf("replaceAttr UTC source = %s, want %s", resUTCSrc.Value.String(), expectedSrcStr)
 	}
 
 	// Test Local replaceAttr
-	resLocal := replaceAttrLocal(nil, timeAttr, 4)
+	resLocal := cfgLocal.replaceAttr(nil, timeAttr)
 	expectedLocalStr := testTime.Local().Format(customTimeLayout)
 	if resLocal.Value.String() != expectedLocalStr {
-		t.Errorf("replaceAttrLocal time = %s, want %s", resLocal.Value.String(), expectedLocalStr)
+		t.Errorf("replaceAttr Local time = %s, want %s", resLocal.Value.String(), expectedLocalStr)
 	}
 
-	resLocalStr := replaceAttrLocal(nil, strAttr, 4)
+	resLocalStr := cfgLocal.replaceAttr(nil, strAttr)
 	if resLocalStr.Key != "key" || resLocalStr.Value.String() != "val" {
-		t.Errorf("replaceAttrLocal non-time attr modified: %v", resLocalStr)
+		t.Errorf("replaceAttr Local non-time attr modified: %v", resLocalStr)
 	}
 
-	resLocalSrc := replaceAttrLocal(nil, srcAttr, 4)
+	resLocalSrc := cfgLocal.replaceAttr(nil, srcAttr)
 	if resLocalSrc.Value.String() != expectedSrcStr {
-		t.Errorf("replaceAttrLocal source = %s, want %s", resLocalSrc.Value.String(), expectedSrcStr)
+		t.Errorf("replaceAttr Local source = %s, want %s", resLocalSrc.Value.String(), expectedSrcStr)
 	}
 }
 
@@ -241,6 +225,13 @@ func TestGetHandler(t *testing.T) {
 		handler := getHandler(cfg)
 		if handler == nil {
 			t.Fatal("expected non-nil handler for default OutputType")
+		}
+	})
+
+	t.Run("Nil Config Handler", func(t *testing.T) {
+		handler := getHandler(nil)
+		if handler == nil {
+			t.Fatal("expected non-nil handler for nil LogConfig")
 		}
 	})
 }
