@@ -1,0 +1,31 @@
+# Binaries for programs and plugins
+*.exe
+*.exe-
+*.dll
+*.so
+*.dylib
+
+# Test binaries produced by `go test -c`
+*.test
+
+# Output of the Go coverage tool
+*.out
+coverage.out
+coverage.txt
+coverage.html
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

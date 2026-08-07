@@ -27,6 +27,12 @@ func TestOptions(t *testing.T) {
 	if config.TimeZone != OutputTimeZoneLocal {
 		t.Errorf("expected TimeZone OutputTimeZoneLocal (%d), got %d", OutputTimeZoneLocal, config.TimeZone)
 	}
+
+	maxPartsOpt := &MaxPartsOption{MaxParts: 2}
+	maxPartsOpt.Apply(config)
+	if config.MaxParts != 2 {
+		t.Errorf("expected MaxParts 2, got %d", config.MaxParts)
+	}
 }
 
 func TestGetLevel(t *testing.T) {
@@ -57,19 +63,21 @@ func TestGetLevel(t *testing.T) {
 }
 
 func TestGetReplaceAttrFunc(t *testing.T) {
-	fnUTC := getReplaceAttrFunc(OutputTimeZoneUTC)
-	if fnUTC == nil {
-		t.Error("expected non-nil replaceAttr function for UTC")
+	strAttr := slog.String("key", "val")
+
+	fnUTC := getReplaceAttrFunc(&LogConfig{TimeZone: OutputTimeZoneUTC, MaxParts: 4})
+	if fnUTC == nil || fnUTC(nil, strAttr).Key != "key" {
+		t.Error("expected non-nil working replaceAttr function for UTC")
 	}
 
-	fnLocal := getReplaceAttrFunc(OutputTimeZoneLocal)
-	if fnLocal == nil {
-		t.Error("expected non-nil replaceAttr function for Local")
+	fnLocal := getReplaceAttrFunc(&LogConfig{TimeZone: OutputTimeZoneLocal, MaxParts: 4})
+	if fnLocal == nil || fnLocal(nil, strAttr).Key != "key" {
+		t.Error("expected non-nil working replaceAttr function for Local")
 	}
 
-	fnDefault := getReplaceAttrFunc(OutputTimeZone(999))
-	if fnDefault == nil {
-		t.Error("expected non-nil replaceAttr function for default")
+	fnDefault := getReplaceAttrFunc(&LogConfig{TimeZone: OutputTimeZone(999)})
+	if fnDefault == nil || fnDefault(nil, strAttr).Key != "key" {
+		t.Error("expected non-nil working replaceAttr function for default")
 	}
 }
 
@@ -77,27 +85,49 @@ func TestFormatSource(t *testing.T) {
 	tests := []struct {
 		name     string
 		source   *slog.Source
+		maxParts int
 		expected string
 	}{
 		{
 			name:     "nil source",
 			source:   nil,
+			maxParts: 4,
 			expected: "",
 		},
 		{
-			name: "more than 3 subdirectories (5 levels)",
+			name: "maxParts 0 (fallback to default 4)",
 			source: &slog.Source{
 				File: "/a/b/c/d/e/file.go",
 				Line: 100,
 			},
+			maxParts: 0,
 			expected: "/c/d/e/file.go:100",
 		},
 		{
-			name: "exactly 3 subdirectories",
+			name: "more than 3 subdirectories (5 levels) with default maxParts 4",
+			source: &slog.Source{
+				File: "/a/b/c/d/e/file.go",
+				Line: 100,
+			},
+			maxParts: 4,
+			expected: "/c/d/e/file.go:100",
+		},
+		{
+			name: "custom maxParts 2 (1 subdirectory + filename)",
+			source: &slog.Source{
+				File: "/a/b/c/d/e/file.go",
+				Line: 100,
+			},
+			maxParts: 2,
+			expected: "/e/file.go:100",
+		},
+		{
+			name: "exactly 3 subdirectories with maxParts 4",
 			source: &slog.Source{
 				File: "/dir1/dir2/dir3/file.go",
 				Line: 50,
 			},
+			maxParts: 4,
 			expected: "/dir1/dir2/dir3/file.go:50",
 		},
 		{
@@ -106,6 +136,7 @@ func TestFormatSource(t *testing.T) {
 				File: "/log/logger_test.go",
 				Line: 229,
 			},
+			maxParts: 4,
 			expected: "/log/logger_test.go:229",
 		},
 		{
@@ -114,13 +145,14 @@ func TestFormatSource(t *testing.T) {
 				File: "filename.go",
 				Line: 12,
 			},
+			maxParts: 4,
 			expected: "filename.go:12",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatSource(tt.source)
+			got := formatSource(tt.source, tt.maxParts)
 			if got != tt.expected {
 				t.Errorf("formatSource() = %q, want %q", got, tt.expected)
 			}
@@ -138,36 +170,36 @@ func TestReplaceAttr(t *testing.T) {
 	})
 
 	// Test UTC replaceAttr
-	resUTC := replaceAttrUTC(nil, timeAttr)
+	resUTC := replaceAttrUTC(nil, timeAttr, 4)
 	expectedUTCStr := testTime.UTC().Format(customTimeLayout)
 	if resUTC.Value.String() != expectedUTCStr {
 		t.Errorf("replaceAttrUTC time = %s, want %s", resUTC.Value.String(), expectedUTCStr)
 	}
 
-	resUTCStr := replaceAttrUTC(nil, strAttr)
+	resUTCStr := replaceAttrUTC(nil, strAttr, 4)
 	if resUTCStr.Key != "key" || resUTCStr.Value.String() != "val" {
 		t.Errorf("replaceAttrUTC non-time attr modified: %v", resUTCStr)
 	}
 
-	resUTCSrc := replaceAttrUTC(nil, srcAttr)
+	resUTCSrc := replaceAttrUTC(nil, srcAttr, 4)
 	expectedSrcStr := "/log/logger_test.go:229"
 	if resUTCSrc.Value.String() != expectedSrcStr {
 		t.Errorf("replaceAttrUTC source = %s, want %s", resUTCSrc.Value.String(), expectedSrcStr)
 	}
 
 	// Test Local replaceAttr
-	resLocal := replaceAttrLocal(nil, timeAttr)
+	resLocal := replaceAttrLocal(nil, timeAttr, 4)
 	expectedLocalStr := testTime.Local().Format(customTimeLayout)
 	if resLocal.Value.String() != expectedLocalStr {
 		t.Errorf("replaceAttrLocal time = %s, want %s", resLocal.Value.String(), expectedLocalStr)
 	}
 
-	resLocalStr := replaceAttrLocal(nil, strAttr)
+	resLocalStr := replaceAttrLocal(nil, strAttr, 4)
 	if resLocalStr.Key != "key" || resLocalStr.Value.String() != "val" {
 		t.Errorf("replaceAttrLocal non-time attr modified: %v", resLocalStr)
 	}
 
-	resLocalSrc := replaceAttrLocal(nil, srcAttr)
+	resLocalSrc := replaceAttrLocal(nil, srcAttr, 4)
 	if resLocalSrc.Value.String() != expectedSrcStr {
 		t.Errorf("replaceAttrLocal source = %s, want %s", resLocalSrc.Value.String(), expectedSrcStr)
 	}
@@ -179,6 +211,7 @@ func TestGetHandler(t *testing.T) {
 			Level:      "info",
 			OutputType: OutputTypeJSON,
 			TimeZone:   OutputTimeZoneUTC,
+			MaxParts:   4,
 		}
 		handler := getHandler(cfg)
 		if handler == nil {
@@ -191,6 +224,7 @@ func TestGetHandler(t *testing.T) {
 			Level:      "debug",
 			OutputType: OutputTypeText,
 			TimeZone:   OutputTimeZoneLocal,
+			MaxParts:   2,
 		}
 		handler := getHandler(cfg)
 		if handler == nil {
@@ -220,6 +254,7 @@ func TestLoggerInit(t *testing.T) {
 		&LogLevelOption{Level: "debug"},
 		&OutputTypeOption{OutputType: OutputTypeJSON},
 		&TimeZoneOption{TimeZone: OutputTimeZoneUTC},
+		&MaxPartsOption{MaxParts: 4},
 	)
 
 	if logger == nil {
