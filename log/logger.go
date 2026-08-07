@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,40 +30,30 @@ var (
 type OutputType int
 type OutputTimeZone int
 
-type LoggerOptions interface {
-	Apply(*LogConfig)
+type LoggerOption func(*LogConfig)
+
+func WithLevel(level string) LoggerOption {
+	return func(c *LogConfig) {
+		c.Level = level
+	}
 }
 
-type LogLevelOption struct {
-	Level string
+func WithOutputType(outputType OutputType) LoggerOption {
+	return func(c *LogConfig) {
+		c.OutputType = outputType
+	}
 }
 
-func (l LogLevelOption) Apply(config *LogConfig) {
-	config.Level = l.Level
+func WithTimeZone(timeZone OutputTimeZone) LoggerOption {
+	return func(c *LogConfig) {
+		c.TimeZone = timeZone
+	}
 }
 
-type OutputTypeOption struct {
-	OutputType OutputType
-}
-
-func (l OutputTypeOption) Apply(config *LogConfig) {
-	config.OutputType = l.OutputType
-}
-
-type TimeZoneOption struct {
-	TimeZone OutputTimeZone
-}
-
-func (t *TimeZoneOption) Apply(config *LogConfig) {
-	config.TimeZone = t.TimeZone
-}
-
-type MaxPartsOption struct {
-	MaxParts int
-}
-
-func (m *MaxPartsOption) Apply(config *LogConfig) {
-	config.MaxParts = m.MaxParts
+func WithMaxParts(maxParts int) LoggerOption {
+	return func(c *LogConfig) {
+		c.MaxParts = maxParts
+	}
 }
 
 type LogConfig struct {
@@ -75,18 +66,55 @@ type LogConfig struct {
 // LoggerInit
 // level: debug, info, warn, error
 // this logger output as an UTC 0 timestamp
-func LoggerInit(opts ...LoggerOptions) {
+func LoggerInit(opts ...LoggerOption) {
 	loggerOnce.Do(func() {
 		config := &LogConfig{}
 		for _, opt := range opts {
-			opt.Apply(config)
+			if opt != nil {
+				opt(config)
+			}
 		}
 		logger = slog.New(getHandler(config))
 	})
 }
 
 func GetLogger() *slog.Logger {
+	if logger == nil {
+		LoggerInit()
+	}
 	return logger
+}
+
+func Info(msg string, args ...any) {
+	GetLogger().Info(msg, args...)
+}
+
+func Debug(msg string, args ...any) {
+	GetLogger().Debug(msg, args...)
+}
+
+func Warn(msg string, args ...any) {
+	GetLogger().Warn(msg, args...)
+}
+
+func Error(msg string, args ...any) {
+	GetLogger().Error(msg, args...)
+}
+
+func Log(ctx context.Context, level slog.Level, msg string, args ...any) {
+	GetLogger().Log(ctx, level, msg, args...)
+}
+
+func LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	GetLogger().LogAttrs(ctx, level, msg, attrs...)
+}
+
+func With(args ...any) *slog.Logger {
+	return GetLogger().With(args...)
+}
+
+func WithGroup(name string) *slog.Logger {
+	return GetLogger().WithGroup(name)
 }
 
 func formatSource(source *slog.Source, maxParts int) string {
@@ -118,9 +146,6 @@ func formatSource(source *slog.Source, maxParts int) string {
 	}
 
 	trimmedPath := strings.Join(nonEmpty, "/")
-	if len(nonEmpty) > 1 {
-		trimmedPath = "/" + trimmedPath
-	}
 	return fmt.Sprintf("%s:%d", trimmedPath, source.Line)
 }
 

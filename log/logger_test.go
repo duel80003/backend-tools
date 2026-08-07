@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"testing"
@@ -10,26 +11,22 @@ import (
 func TestOptions(t *testing.T) {
 	config := &LogConfig{}
 
-	levelOpt := &LogLevelOption{Level: "debug"}
-	levelOpt.Apply(config)
+	WithLevel("debug")(config)
 	if config.Level != "debug" {
 		t.Errorf("expected Level 'debug', got '%s'", config.Level)
 	}
 
-	outputOpt := &OutputTypeOption{OutputType: OutputTypeText}
-	outputOpt.Apply(config)
+	WithOutputType(OutputTypeText)(config)
 	if config.OutputType != OutputTypeText {
 		t.Errorf("expected OutputType OutputTypeText (%d), got %d", OutputTypeText, config.OutputType)
 	}
 
-	tzOpt := &TimeZoneOption{TimeZone: OutputTimeZoneLocal}
-	tzOpt.Apply(config)
+	WithTimeZone(OutputTimeZoneLocal)(config)
 	if config.TimeZone != OutputTimeZoneLocal {
 		t.Errorf("expected TimeZone OutputTimeZoneLocal (%d), got %d", OutputTimeZoneLocal, config.TimeZone)
 	}
 
-	maxPartsOpt := &MaxPartsOption{MaxParts: 2}
-	maxPartsOpt.Apply(config)
+	WithMaxParts(2)(config)
 	if config.MaxParts != 2 {
 		t.Errorf("expected MaxParts 2, got %d", config.MaxParts)
 	}
@@ -82,7 +79,7 @@ func TestFormatSource(t *testing.T) {
 				Line: 100,
 			},
 			maxParts: 0,
-			expected: "/c/d/e/file.go:100",
+			expected: "c/d/e/file.go:100",
 		},
 		{
 			name: "more than 3 subdirectories (5 levels) with default maxParts 4",
@@ -91,7 +88,7 @@ func TestFormatSource(t *testing.T) {
 				Line: 100,
 			},
 			maxParts: 4,
-			expected: "/c/d/e/file.go:100",
+			expected: "c/d/e/file.go:100",
 		},
 		{
 			name: "custom maxParts 2 (1 subdirectory + filename)",
@@ -100,7 +97,7 @@ func TestFormatSource(t *testing.T) {
 				Line: 100,
 			},
 			maxParts: 2,
-			expected: "/e/file.go:100",
+			expected: "e/file.go:100",
 		},
 		{
 			name: "exactly 3 subdirectories with maxParts 4",
@@ -109,16 +106,16 @@ func TestFormatSource(t *testing.T) {
 				Line: 50,
 			},
 			maxParts: 4,
-			expected: "/dir1/dir2/dir3/file.go:50",
+			expected: "dir1/dir2/dir3/file.go:50",
 		},
 		{
-			name: "1 subdirectory (like /log/logger_test.go:229)",
+			name: "1 subdirectory (like log/logger_test.go:229)",
 			source: &slog.Source{
 				File: "/log/logger_test.go",
 				Line: 229,
 			},
 			maxParts: 4,
-			expected: "/log/logger_test.go:229",
+			expected: "log/logger_test.go:229",
 		},
 		{
 			name: "only filename (file on root)",
@@ -166,7 +163,7 @@ func TestReplaceAttr(t *testing.T) {
 	}
 
 	resUTCSrc := cfgUTC.replaceAttr(nil, srcAttr)
-	expectedSrcStr := "/log/logger_test.go:229"
+	expectedSrcStr := "log/logger_test.go:229"
 	if resUTCSrc.Value.String() != expectedSrcStr {
 		t.Errorf("replaceAttr UTC source = %s, want %s", resUTCSrc.Value.String(), expectedSrcStr)
 	}
@@ -242,10 +239,10 @@ func TestLoggerInit(t *testing.T) {
 	logger = nil
 
 	LoggerInit(
-		&LogLevelOption{Level: "debug"},
-		&OutputTypeOption{OutputType: OutputTypeJSON},
-		&TimeZoneOption{TimeZone: OutputTimeZoneUTC},
-		&MaxPartsOption{MaxParts: 4},
+		WithLevel("debug"),
+		WithOutputType(OutputTypeJSON),
+		WithTimeZone(OutputTimeZoneUTC),
+		WithMaxParts(4),
 	)
 
 	if logger == nil {
@@ -260,8 +257,40 @@ func TestLoggerInit(t *testing.T) {
 
 	// Calling LoggerInit again should not panic or re-initialize due to sync.Once
 	prevLogger := logger
-	LoggerInit(&LogLevelOption{Level: "error"})
+	LoggerInit(WithLevel("error"))
 	if logger != prevLogger {
 		t.Error("expected logger instance to remain unchanged on second LoggerInit call")
+	}
+}
+
+func TestPackageLevelLogging(t *testing.T) {
+	ctx := context.Background()
+
+	Info("info log", slog.String("key", "val"))
+	Debug("debug log", slog.String("key", "val"))
+	Warn("warn log", slog.String("key", "val"))
+	Error("error log", slog.String("key", "val"))
+
+	Log(ctx, slog.LevelInfo, "log msg", slog.String("key", "val"))
+	LogAttrs(ctx, slog.LevelInfo, "log attrs msg", slog.String("key", "val"))
+
+	wLogger := With(slog.String("component", "test"))
+	if wLogger == nil {
+		t.Error("expected non-nil logger from With()")
+	}
+
+	gLogger := WithGroup("group1")
+	if gLogger == nil {
+		t.Error("expected non-nil logger from WithGroup()")
+	}
+}
+
+func TestAutoInitGetLogger(t *testing.T) {
+	loggerOnce = sync.Once{}
+	logger = nil
+
+	l := GetLogger()
+	if l == nil {
+		t.Fatal("expected GetLogger() to auto-initialize logger when nil")
 	}
 }
