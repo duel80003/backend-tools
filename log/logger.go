@@ -2,12 +2,14 @@ package logger
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -17,7 +19,14 @@ const (
 var (
 	logger     *slog.Logger
 	loggerOnce sync.Once
+	workDir    string
 )
+
+func init() {
+	if wd, err := os.Getwd(); err == nil {
+		workDir = filepath.ToSlash(filepath.Clean(wd))
+	}
+}
 
 var (
 	OutputTypeJSON OutputType = 1
@@ -85,28 +94,52 @@ func GetLogger() *slog.Logger {
 	return logger
 }
 
+func logAt(ctx context.Context, level slog.Level, msg string, args ...any) {
+	l := GetLogger()
+	if !l.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.Add(args...)
+	_ = l.Handler().Handle(ctx, r)
+}
+
+func logAttrsAt(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	l := GetLogger()
+	if !l.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.AddAttrs(attrs...)
+	_ = l.Handler().Handle(ctx, r)
+}
+
 func Info(msg string, args ...any) {
-	GetLogger().Info(msg, args...)
+	logAt(context.Background(), slog.LevelInfo, msg, args...)
 }
 
 func Debug(msg string, args ...any) {
-	GetLogger().Debug(msg, args...)
+	logAt(context.Background(), slog.LevelDebug, msg, args...)
 }
 
 func Warn(msg string, args ...any) {
-	GetLogger().Warn(msg, args...)
+	logAt(context.Background(), slog.LevelWarn, msg, args...)
 }
 
 func Error(msg string, args ...any) {
-	GetLogger().Error(msg, args...)
+	logAt(context.Background(), slog.LevelError, msg, args...)
 }
 
 func Log(ctx context.Context, level slog.Level, msg string, args ...any) {
-	GetLogger().Log(ctx, level, msg, args...)
+	logAt(ctx, level, msg, args...)
 }
 
 func LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
-	GetLogger().LogAttrs(ctx, level, msg, attrs...)
+	logAttrsAt(ctx, level, msg, attrs...)
 }
 
 func With(args ...any) *slog.Logger {
@@ -124,29 +157,27 @@ func formatSource(source *slog.Source, maxParts int) string {
 	if maxParts <= 0 {
 		maxParts = 4 // default max 3 sub-directories + 1 filename
 	}
-	file := source.File
-	if wd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(wd, file); err == nil && !strings.HasPrefix(rel, "..") {
-			file = rel
+	file := filepath.ToSlash(source.File)
+	if workDir != "" && strings.HasPrefix(file, workDir+"/") {
+		file = file[len(workDir)+1:]
+	} else if workDir != "" && file == workDir {
+		file = filepath.Base(file)
+	}
+
+	slashes := 0
+	startIdx := 0
+	for i := len(file) - 1; i >= 0; i-- {
+		if file[i] == '/' {
+			slashes++
+			if slashes == maxParts {
+				startIdx = i + 1
+				break
+			}
 		}
 	}
 
-	cleanPath := filepath.ToSlash(filepath.Clean(file))
-	parts := strings.Split(cleanPath, "/")
-
-	nonEmpty := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" && p != "." {
-			nonEmpty = append(nonEmpty, p)
-		}
-	}
-
-	if len(nonEmpty) > maxParts {
-		nonEmpty = nonEmpty[len(nonEmpty)-maxParts:]
-	}
-
-	trimmedPath := strings.Join(nonEmpty, "/")
-	return fmt.Sprintf("%s:%d", trimmedPath, source.Line)
+	trimmed := strings.TrimPrefix(file[startIdx:], "/")
+	return trimmed + ":" + strconv.Itoa(source.Line)
 }
 
 func (c *LogConfig) replaceAttr(_ []string, a slog.Attr) slog.Attr {

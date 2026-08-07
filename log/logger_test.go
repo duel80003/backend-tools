@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -125,6 +126,15 @@ func TestFormatSource(t *testing.T) {
 			},
 			maxParts: 4,
 			expected: "filename.go:12",
+		},
+		{
+			name: "file equals workDir",
+			source: &slog.Source{
+				File: workDir,
+				Line: 5,
+			},
+			maxParts: 4,
+			expected: filepath.Base(workDir) + ":5",
 		},
 	}
 
@@ -283,6 +293,14 @@ func TestPackageLevelLogging(t *testing.T) {
 	if gLogger == nil {
 		t.Error("expected non-nil logger from WithGroup()")
 	}
+
+	// Test disabled log level branch
+	prev := logger
+	logger = slog.New(getHandler(&LogConfig{Level: "error"}))
+	Debug("disabled debug log")
+	Log(ctx, slog.LevelDebug, "disabled log")
+	LogAttrs(ctx, slog.LevelDebug, "disabled log attrs")
+	logger = prev
 }
 
 func TestAutoInitGetLogger(t *testing.T) {
