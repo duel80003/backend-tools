@@ -1,3 +1,3 @@
-module backend-tools
+module gitlab.baifu-tech.net/v3/bf_backend_service/backend-tools
 
 go 1.26
