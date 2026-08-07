@@ -246,7 +246,7 @@ func TestGetHandler(t *testing.T) {
 func TestLoggerInit(t *testing.T) {
 	// Reset loggerOnce and logger for isolated testing
 	loggerOnce = sync.Once{}
-	logger = nil
+	defaultLogger = nil
 
 	LoggerInit(
 		WithLevel("debug"),
@@ -255,20 +255,20 @@ func TestLoggerInit(t *testing.T) {
 		WithMaxParts(4),
 	)
 
-	if logger == nil {
+	if defaultLogger == nil {
 		t.Fatal("expected logger to be initialized, but got nil")
 	}
 
-	logger.Info("TestLoggerInit", slog.String("test", "test1"))
+	defaultLogger.Info("TestLoggerInit", slog.String("test", "test1"))
 
-	if GetLogger() != logger {
+	if GetLogger() != defaultLogger {
 		t.Error("expected GetLogger() to return the initialized logger instance")
 	}
 
 	// Calling LoggerInit again should not panic or re-initialize due to sync.Once
-	prevLogger := logger
+	prevLogger := defaultLogger
 	LoggerInit(WithLevel("error"))
-	if logger != prevLogger {
+	if defaultLogger != prevLogger {
 		t.Error("expected logger instance to remain unchanged on second LoggerInit call")
 	}
 }
@@ -295,20 +295,40 @@ func TestPackageLevelLogging(t *testing.T) {
 	}
 
 	// Test disabled log level branch
-	prev := logger
-	logger = slog.New(getHandler(&LogConfig{Level: "error"}))
+	prev := defaultLogger
+	defaultLogger = slog.New(getHandler(&LogConfig{Level: "error"}))
 	Debug("disabled debug log")
 	Log(ctx, slog.LevelDebug, "disabled log")
 	LogAttrs(ctx, slog.LevelDebug, "disabled log attrs")
-	logger = prev
+	defaultLogger = prev
 }
 
 func TestAutoInitGetLogger(t *testing.T) {
 	loggerOnce = sync.Once{}
-	logger = nil
+	defaultLogger = nil
 
 	l := GetLogger()
 	if l == nil {
 		t.Fatal("expected GetLogger() to auto-initialize logger when nil")
+	}
+}
+
+func TestNewCustomLogger(t *testing.T) {
+	custom1 := New(
+		WithLevel("debug"),
+		WithOutputType(OutputTypeText),
+		WithTimeZone(OutputTimeZoneLocal),
+		WithMaxParts(2),
+	)
+	if custom1 == nil {
+		t.Fatal("expected non-nil custom logger from New()")
+	}
+
+	custom2 := NewLogger(
+		WithLevel("warn"),
+		WithOutputType(OutputTypeJSON),
+	)
+	if custom2 == nil {
+		t.Fatal("expected non-nil custom logger from NewLogger()")
 	}
 }

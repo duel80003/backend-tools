@@ -17,9 +17,9 @@ const (
 )
 
 var (
-	logger     *slog.Logger
-	loggerOnce sync.Once
-	workDir    string
+	defaultLogger *slog.Logger
+	loggerOnce    sync.Once
+	workDir       string
 )
 
 func init() {
@@ -72,26 +72,34 @@ type LogConfig struct {
 	MaxParts   int
 }
 
-// LoggerInit
-// level: debug, info, warn, error
-// this logger output as an UTC 0 timestamp
+// New creates and returns a new custom *slog.Logger instance configured with the provided options.
+func New(opts ...LoggerOption) *slog.Logger {
+	config := &LogConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(config)
+		}
+	}
+	return slog.New(getHandler(config))
+}
+
+// NewLogger is an alias for New to create a custom *slog.Logger instance.
+func NewLogger(opts ...LoggerOption) *slog.Logger {
+	return New(opts...)
+}
+
+// LoggerInit initializes the global default package-level logger.
 func LoggerInit(opts ...LoggerOption) {
 	loggerOnce.Do(func() {
-		config := &LogConfig{}
-		for _, opt := range opts {
-			if opt != nil {
-				opt(config)
-			}
-		}
-		logger = slog.New(getHandler(config))
+		defaultLogger = New(opts...)
 	})
 }
 
 func GetLogger() *slog.Logger {
-	if logger == nil {
+	if defaultLogger == nil {
 		LoggerInit()
 	}
-	return logger
+	return defaultLogger
 }
 
 func logAt(ctx context.Context, level slog.Level, msg string, args ...any) {
