@@ -17,12 +17,11 @@ A lightweight, high-performance set of backend utilities for Go applications, pr
 
 ### `log` - Structured Logging Package
 
-The `log` package provides a structured, context-aware logger built on Go's standard `log/slog`.
+The `log` package provides a stateless factory for creating structured `*slog.Logger` instances built on Go's standard `log/slog`.
 
 #### Features
-- **Clean Package-Level Functions**: Log directly via `logger.Info()`, `logger.Debug()`, `logger.Warn()`, `logger.Error()`, etc.
-- **Functional Options**: Configure level, output format (JSON/Text), time zone (UTC/Local), and source path depth.
-- **Accurate Caller Depth**: Package-level log wrappers accurately report caller source line numbers (`main.go:20` instead of wrapper file lines).
+- **Stateless & Thread-Safe**: No global default logger singletons or hidden package-level state.
+- **Functional Options**: Configure log level, output format (JSON/Text), time zone (UTC/Local), custom `ReplaceAttr`, and source path depth.
 - **Customizable Source Formatting**: Formats source file paths relative to the project working directory without leading slashes and caps path depth to configurable limits (e.g. `log/logger.go:127`).
 - **High Performance**: Optimized with cached working directory and zero-allocation path trimming.
 
@@ -35,32 +34,40 @@ import (
 	"context"
 	"log/slog"
 
-	"backend-tools/log"
+	logger "github.com/duel80003/backend-tools/log"
 )
 
 func main() {
-	// Initialize logger (optional; auto-initializes with defaults if omitted)
-	logger.LoggerInit(
+	// Create a Text logger instance (for console output)
+	consoleLogger := logger.New(
 		logger.WithLevel("debug"),
-		logger.WithOutputType(logger.OutputTypeJSON), // OutputTypeJSON or OutputTypeText
-		logger.WithTimeZone(logger.OutputTimeZoneUTC),// OutputTimeZoneUTC or OutputTimeZoneLocal
-		logger.WithMaxParts(3),                        // Subdirectory depth limit for source caller
+		logger.WithOutputType(logger.OutputTypeText), // OutputTypeText or OutputTypeJSON
+		logger.WithTimeZone(logger.OutputTimeZoneLocal),
+		logger.WithMaxParts(2),
 	)
 
-	// Direct package-level logging
-	logger.Info("server starting", slog.Int("port", 8080))
-	logger.Debug("debugging request", slog.String("path", "/api/v1/health"))
-	logger.Warn("high memory usage", slog.Float64("mem_pct", 85.5))
-	logger.Error("database connection failed", slog.String("db", "postgres"))
+	consoleLogger.Info("server starting", slog.Int("port", 8080))
+	consoleLogger.Debug("debugging request", slog.String("path", "/api/v1/health"))
+
+	// Create a JSON logger instance (for Kibana / log analytics)
+	kibanaLogger := logger.New(
+		logger.WithLevel("info"),
+		logger.WithOutputType(logger.OutputTypeJSON),
+		logger.WithTimeZone(logger.OutputTimeZoneUTC),
+	)
+
+	kibanaLogger.Info("user_payment",
+		slog.String("user_id", "usr_123"),
+		slog.Float64("amount", 99.95),
+	)
 
 	// Context-aware logging
 	ctx := context.Background()
-	logger.Log(ctx, slog.LevelInfo, "context log", slog.String("trace_id", "abc-123"))
-	logger.LogAttrs(ctx, slog.LevelInfo, "attr log", slog.String("user", "alice"))
+	kibanaLogger.InfoContext(ctx, "context log", slog.String("trace_id", "abc-123"))
 
 	// Sub-loggers with pre-attached attributes or groups
-	componentLogger := logger.With(slog.String("component", "auth"))
-	componentLogger.Info("user logged in")
+	authLogger := consoleLogger.With(slog.String("component", "auth"))
+	authLogger.Info("user logged in")
 }
 ```
 

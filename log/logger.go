@@ -1,26 +1,18 @@
 package logger
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 const (
 	customTimeLayout = "2006-01-02 15:04:05.000"
 )
 
-var (
-	defaultLogger *slog.Logger
-	loggerMu      sync.RWMutex
-	workDir       string
-)
+var workDir string
 
 func init() {
 	if wd, err := os.Getwd(); err == nil {
@@ -93,85 +85,6 @@ func New(opts ...LoggerOption) *slog.Logger {
 // NewLogger is an alias for New to create a custom *slog.Logger instance.
 func NewLogger(opts ...LoggerOption) *slog.Logger {
 	return New(opts...)
-}
-
-// LoggerInit initializes or reconfigures the global default package-level logger.
-func LoggerInit(opts ...LoggerOption) {
-	loggerMu.Lock()
-	defer loggerMu.Unlock()
-	defaultLogger = New(opts...)
-}
-
-func GetLogger() *slog.Logger {
-	loggerMu.RLock()
-	l := defaultLogger
-	loggerMu.RUnlock()
-
-	if l == nil {
-		loggerMu.Lock()
-		if defaultLogger == nil {
-			defaultLogger = New()
-		}
-		l = defaultLogger
-		loggerMu.Unlock()
-	}
-	return l
-}
-
-func logAt(ctx context.Context, level slog.Level, msg string, args ...any) {
-	l := GetLogger()
-	if !l.Enabled(ctx, level) {
-		return
-	}
-	var pcs [1]uintptr
-	runtime.Callers(3, pcs[:])
-	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
-	r.Add(args...)
-	_ = l.Handler().Handle(ctx, r)
-}
-
-func logAttrsAt(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
-	l := GetLogger()
-	if !l.Enabled(ctx, level) {
-		return
-	}
-	var pcs [1]uintptr
-	runtime.Callers(3, pcs[:])
-	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
-	r.AddAttrs(attrs...)
-	_ = l.Handler().Handle(ctx, r)
-}
-
-func Info(msg string, args ...any) {
-	logAt(context.Background(), slog.LevelInfo, msg, args...)
-}
-
-func Debug(msg string, args ...any) {
-	logAt(context.Background(), slog.LevelDebug, msg, args...)
-}
-
-func Warn(msg string, args ...any) {
-	logAt(context.Background(), slog.LevelWarn, msg, args...)
-}
-
-func Error(msg string, args ...any) {
-	logAt(context.Background(), slog.LevelError, msg, args...)
-}
-
-func Log(ctx context.Context, level slog.Level, msg string, args ...any) {
-	logAt(ctx, level, msg, args...)
-}
-
-func LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
-	logAttrsAt(ctx, level, msg, attrs...)
-}
-
-func With(args ...any) *slog.Logger {
-	return GetLogger().With(args...)
-}
-
-func WithGroup(name string) *slog.Logger {
-	return GetLogger().WithGroup(name)
 }
 
 func formatSource(source *slog.Source, maxParts int) string {

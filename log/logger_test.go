@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"context"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -284,75 +283,6 @@ func TestGetHandler(t *testing.T) {
 	})
 }
 
-func TestLoggerInit(t *testing.T) {
-	// Reset logger for isolated testing
-	defaultLogger = nil
-
-	LoggerInit(
-		WithLevel("debug"),
-		WithOutputType(OutputTypeJSON),
-		WithTimeZone(OutputTimeZoneUTC),
-		WithMaxParts(4),
-	)
-
-	if defaultLogger == nil {
-		t.Fatal("expected logger to be initialized, but got nil")
-	}
-
-	defaultLogger.Info("TestLoggerInit", slog.String("test", "test1"))
-
-	if GetLogger() != defaultLogger {
-		t.Error("expected GetLogger() to return the initialized logger instance")
-	}
-
-	// Calling LoggerInit again updates defaultLogger
-	prevLogger := defaultLogger
-	LoggerInit(WithLevel("error"))
-	if defaultLogger == prevLogger {
-		t.Error("expected logger instance to be re-initialized on second LoggerInit call")
-	}
-}
-
-func TestPackageLevelLogging(t *testing.T) {
-	defaultLogger = slog.New(getHandler(&LogConfig{Level: "debug"}))
-	ctx := context.Background()
-
-	Info("info log", slog.String("key", "val"))
-	Debug("debug log", slog.String("key", "val"))
-	Warn("warn log", slog.String("key", "val"))
-	Error("error log", slog.String("key", "val"))
-
-	Log(ctx, slog.LevelInfo, "log msg", slog.String("key", "val"))
-	LogAttrs(ctx, slog.LevelInfo, "log attrs msg", slog.String("key", "val"))
-
-	wLogger := With(slog.String("component", "test"))
-	if wLogger == nil {
-		t.Error("expected non-nil logger from With()")
-	}
-
-	gLogger := WithGroup("group1")
-	if gLogger == nil {
-		t.Error("expected non-nil logger from WithGroup()")
-	}
-
-	// Test disabled log level branch
-	prev := defaultLogger
-	defaultLogger = slog.New(getHandler(&LogConfig{Level: "error"}))
-	Debug("disabled debug log")
-	Log(ctx, slog.LevelDebug, "disabled log")
-	LogAttrs(ctx, slog.LevelDebug, "disabled log attrs")
-	defaultLogger = prev
-}
-
-func TestAutoInitGetLogger(t *testing.T) {
-	defaultLogger = nil
-
-	l := GetLogger()
-	if l == nil {
-		t.Fatal("expected GetLogger() to auto-initialize logger when nil")
-	}
-}
-
 func TestNewCustomLogger(t *testing.T) {
 	custom1 := New(
 		WithLevel("debug"),
@@ -364,6 +294,8 @@ func TestNewCustomLogger(t *testing.T) {
 		t.Fatal("expected non-nil custom logger from New()")
 	}
 
+	custom1.Info("test custom1", slog.String("key", "val"))
+
 	custom2 := NewLogger(
 		WithLevel("warn"),
 		WithOutputType(OutputTypeJSON),
@@ -371,4 +303,6 @@ func TestNewCustomLogger(t *testing.T) {
 	if custom2 == nil {
 		t.Fatal("expected non-nil custom logger from NewLogger()")
 	}
+
+	custom2.Warn("test custom2", slog.String("key", "val"))
 }
