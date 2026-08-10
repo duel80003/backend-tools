@@ -16,9 +16,11 @@ const (
 	customTimeLayout = "2006-01-02 15:04:05.000"
 )
 
-var (
-	defaultLogger atomic.Pointer[slog.Logger]
-	workDir       string
+const (
+	LevelDebug LogLevel = "debug"
+	LevenInfo  LogLevel = "info"
+	LevelWarn  LogLevel = "warn"
+	LevelError LogLevel = "error"
 )
 
 func init() {
@@ -28,6 +30,11 @@ func init() {
 }
 
 var (
+	defaultLogger atomic.Pointer[slog.Logger]
+	workDir       string
+)
+
+var (
 	OutputTypeJSON OutputType = 1
 	OutputTypeText OutputType = 2
 
@@ -35,12 +42,18 @@ var (
 	OutputTimeZoneLocal OutputTimeZone = 2
 )
 
+type LogLevel string
+
+func (ll LogLevel) toLower() LogLevel {
+	return LogLevel(strings.ToLower(string(ll)))
+}
+
 type OutputType int
 type OutputTimeZone int
 
 type LoggerOption func(*LogConfig)
 
-func WithLevel(level string) LoggerOption {
+func WithLevel(level LogLevel) LoggerOption {
 	return func(c *LogConfig) {
 		c.Level = level
 	}
@@ -71,7 +84,7 @@ func WithReplaceAttr(replaceAttr func(groups []string, a slog.Attr) slog.Attr) L
 }
 
 type LogConfig struct {
-	Level       string
+	Level       LogLevel
 	OutputType  OutputType
 	TimeZone    OutputTimeZone
 	MaxParts    int
@@ -221,13 +234,13 @@ func (c *LogConfig) getReplaceAttr() func(groups []string, a slog.Attr) slog.Att
 	return c.defaultReplaceAttr
 }
 
-func getLevel(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
+func getLevel(level LogLevel) slog.Level {
+	switch level.toLower() {
+	case LevelDebug:
 		return slog.LevelDebug
-	case "error":
+	case LevelError:
 		return slog.LevelError
-	case "warn":
+	case LevelWarn:
 		return slog.LevelWarn
 	default:
 		return slog.LevelInfo

@@ -40,23 +40,18 @@ func TestOptions(t *testing.T) {
 
 func TestGetLevel(t *testing.T) {
 	tests := []struct {
-		input    string
+		input    LogLevel
 		expected slog.Level
 	}{
-		{"debug", slog.LevelDebug},
-		{"DEBUG", slog.LevelDebug},
-		{"info", slog.LevelInfo},
-		{"INFO", slog.LevelInfo},
-		{"warn", slog.LevelWarn},
-		{"WARN", slog.LevelWarn},
-		{"error", slog.LevelError},
-		{"ERROR", slog.LevelError},
-		{"unknown", slog.LevelInfo},
-		{"", slog.LevelInfo},
+		{LevelDebug, slog.LevelDebug},
+		{LevenInfo, slog.LevelInfo},
+		{LevelWarn, slog.LevelWarn},
+		{LevelError, slog.LevelError},
+		{LogLevel("error"), slog.LevelError},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
+		t.Run(string(tt.input), func(t *testing.T) {
 			got := getLevel(tt.input)
 			if got != tt.expected {
 				t.Errorf("getLevel(%q) = %v; want %v", tt.input, got, tt.expected)
@@ -351,7 +346,7 @@ func TestPackageLevelLogging(t *testing.T) {
 func TestDefaultAndCustomLoggersTogether(t *testing.T) {
 	// Initialize default logger with TEXT output and INFO level
 	LoggerInit(
-		WithLevel("info"),
+		WithLevel(LevenInfo),
 		WithOutputType(OutputTypeText),
 		WithTimeZone(OutputTimeZoneLocal),
 		WithMaxParts(2),
@@ -361,7 +356,7 @@ func TestDefaultAndCustomLoggersTogether(t *testing.T) {
 
 	// Create custom logger with JSON output and DEBUG level
 	customJSONLogger := New(
-		WithLevel("debug"),
+		WithLevel(LevelDebug),
 		WithOutputType(OutputTypeJSON),
 		WithTimeZone(OutputTimeZoneUTC),
 		WithMaxParts(3),
