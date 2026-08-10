@@ -109,7 +109,6 @@ func getCallerFunctionName(ctx context.Context) string {
 		if alias, ok := ctx.Value(Caller).(string); ok {
 			return alias
 		}
-		return "caller unknown"
 	}
 
 	pc := make([]uintptr, 15)
