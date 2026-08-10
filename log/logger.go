@@ -18,7 +18,7 @@ const (
 
 var (
 	defaultLogger *slog.Logger
-	loggerOnce    sync.Once
+	loggerMu      sync.RWMutex
 	workDir       string
 )
 
@@ -65,7 +65,7 @@ func WithMaxParts(maxParts int) LoggerOption {
 	}
 }
 
-func WithReplaceAttr(replaceAttr func([]string, slog.Attr) slog.Attr) LoggerOption {
+func WithReplaceAttr(replaceAttr func(groups []string, a slog.Attr) slog.Attr) LoggerOption {
 	return func(c *LogConfig) {
 		c.ReplaceAttr = replaceAttr
 	}
@@ -75,8 +75,8 @@ type LogConfig struct {
 	Level       string
 	OutputType  OutputType
 	TimeZone    OutputTimeZone
-	ReplaceAttr func([]string, slog.Attr) slog.Attr
 	MaxParts    int
+	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
 }
 
 // New creates and returns a new custom *slog.Logger instance configured with the provided options.
@@ -95,18 +95,27 @@ func NewLogger(opts ...LoggerOption) *slog.Logger {
 	return New(opts...)
 }
 
-// LoggerInit initializes the global default package-level logger.
+// LoggerInit initializes or reconfigures the global default package-level logger.
 func LoggerInit(opts ...LoggerOption) {
-	loggerOnce.Do(func() {
-		defaultLogger = New(opts...)
-	})
+	loggerMu.Lock()
+	defer loggerMu.Unlock()
+	defaultLogger = New(opts...)
 }
 
 func GetLogger() *slog.Logger {
-	if defaultLogger == nil {
-		LoggerInit()
+	loggerMu.RLock()
+	l := defaultLogger
+	loggerMu.RUnlock()
+
+	if l == nil {
+		loggerMu.Lock()
+		if defaultLogger == nil {
+			defaultLogger = New()
+		}
+		l = defaultLogger
+		loggerMu.Unlock()
 	}
-	return defaultLogger
+	return l
 }
 
 func logAt(ctx context.Context, level slog.Level, msg string, args ...any) {
@@ -248,6 +257,6 @@ func getHandler(config *LogConfig) slog.Handler {
 	case OutputTypeText:
 		return slog.NewTextHandler(os.Stdout, &options)
 	default:
-		return slog.NewJSONHandler(os.Stdout, &options)
+		return slog.NewTextHandler(os.Stdout, &options)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 )
@@ -286,8 +285,7 @@ func TestGetHandler(t *testing.T) {
 }
 
 func TestLoggerInit(t *testing.T) {
-	// Reset loggerOnce and logger for isolated testing
-	loggerOnce = sync.Once{}
+	// Reset logger for isolated testing
 	defaultLogger = nil
 
 	LoggerInit(
@@ -307,15 +305,16 @@ func TestLoggerInit(t *testing.T) {
 		t.Error("expected GetLogger() to return the initialized logger instance")
 	}
 
-	// Calling LoggerInit again should not panic or re-initialize due to sync.Once
+	// Calling LoggerInit again updates defaultLogger
 	prevLogger := defaultLogger
 	LoggerInit(WithLevel("error"))
-	if defaultLogger != prevLogger {
-		t.Error("expected logger instance to remain unchanged on second LoggerInit call")
+	if defaultLogger == prevLogger {
+		t.Error("expected logger instance to be re-initialized on second LoggerInit call")
 	}
 }
 
 func TestPackageLevelLogging(t *testing.T) {
+	defaultLogger = slog.New(getHandler(&LogConfig{Level: "debug"}))
 	ctx := context.Background()
 
 	Info("info log", slog.String("key", "val"))
@@ -346,7 +345,6 @@ func TestPackageLevelLogging(t *testing.T) {
 }
 
 func TestAutoInitGetLogger(t *testing.T) {
-	loggerOnce = sync.Once{}
 	defaultLogger = nil
 
 	l := GetLogger()
