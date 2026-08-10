@@ -65,11 +65,18 @@ func WithMaxParts(maxParts int) LoggerOption {
 	}
 }
 
+func WithReplaceAttr(replaceAttr func([]string, slog.Attr) slog.Attr) LoggerOption {
+	return func(c *LogConfig) {
+		c.ReplaceAttr = replaceAttr
+	}
+}
+
 type LogConfig struct {
-	Level      string
-	OutputType OutputType
-	TimeZone   OutputTimeZone
-	MaxParts   int
+	Level       string
+	OutputType  OutputType
+	TimeZone    OutputTimeZone
+	ReplaceAttr func([]string, slog.Attr) slog.Attr
+	MaxParts    int
 }
 
 // New creates and returns a new custom *slog.Logger instance configured with the provided options.
@@ -188,7 +195,7 @@ func formatSource(source *slog.Source, maxParts int) string {
 	return trimmed + ":" + strconv.Itoa(source.Line)
 }
 
-func (c *LogConfig) replaceAttr(_ []string, a slog.Attr) slog.Attr {
+func (c *LogConfig) defaultReplaceAttr(_ []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.TimeKey {
 		t := a.Value.Time()
 		if c.TimeZone == OutputTimeZoneLocal {
@@ -204,6 +211,13 @@ func (c *LogConfig) replaceAttr(_ []string, a slog.Attr) slog.Attr {
 		}
 	}
 	return a
+}
+
+func (c *LogConfig) getReplaceAttr() func(groups []string, a slog.Attr) slog.Attr {
+	if c.ReplaceAttr != nil {
+		return c.ReplaceAttr
+	}
+	return c.defaultReplaceAttr
 }
 
 func getLevel(level string) slog.Level {
@@ -226,7 +240,7 @@ func getHandler(config *LogConfig) slog.Handler {
 	options := slog.HandlerOptions{
 		AddSource:   true,
 		Level:       getLevel(config.Level),
-		ReplaceAttr: config.replaceAttr,
+		ReplaceAttr: config.getReplaceAttr(),
 	}
 	switch config.OutputType {
 	case OutputTypeJSON:

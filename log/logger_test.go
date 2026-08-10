@@ -31,6 +31,12 @@ func TestOptions(t *testing.T) {
 	if config.MaxParts != 2 {
 		t.Errorf("expected MaxParts 2, got %d", config.MaxParts)
 	}
+
+	customReplace := func(groups []string, a slog.Attr) slog.Attr { return a }
+	WithReplaceAttr(customReplace)(config)
+	if config.ReplaceAttr == nil {
+		t.Error("expected ReplaceAttr to be set")
+	}
 }
 
 func TestGetLevel(t *testing.T) {
@@ -136,6 +142,15 @@ func TestFormatSource(t *testing.T) {
 			maxParts: 4,
 			expected: filepath.Base(workDir) + ":5",
 		},
+		{
+			name: "file with workDir prefix",
+			source: &slog.Source{
+				File: workDir + "/a/b/c/file.go",
+				Line: 20,
+			},
+			maxParts: 4,
+			expected: "a/b/c/file.go:20",
+		},
 	}
 
 	for _, tt := range tests {
@@ -156,43 +171,70 @@ func TestReplaceAttr(t *testing.T) {
 		File: "/log/logger_test.go",
 		Line: 229,
 	})
+	nonSrcAttr := slog.Any(slog.SourceKey, "invalid_source")
+	nilSrcAttr := slog.Any(slog.SourceKey, (*slog.Source)(nil))
 
 	cfgUTC := &LogConfig{TimeZone: OutputTimeZoneUTC, MaxParts: 4}
 	cfgLocal := &LogConfig{TimeZone: OutputTimeZoneLocal, MaxParts: 4}
 
-	// Test UTC replaceAttr
-	resUTC := cfgUTC.replaceAttr(nil, timeAttr)
+	// Test UTC replaceAttr (via getReplaceAttr())
+	replaceAttrUTC := cfgUTC.getReplaceAttr()
+	resUTC := replaceAttrUTC(nil, timeAttr)
 	expectedUTCStr := testTime.UTC().Format(customTimeLayout)
 	if resUTC.Value.String() != expectedUTCStr {
 		t.Errorf("replaceAttr UTC time = %s, want %s", resUTC.Value.String(), expectedUTCStr)
 	}
 
-	resUTCStr := cfgUTC.replaceAttr(nil, strAttr)
+	resUTCStr := replaceAttrUTC(nil, strAttr)
 	if resUTCStr.Key != "key" || resUTCStr.Value.String() != "val" {
 		t.Errorf("replaceAttr non-time attr modified: %v", resUTCStr)
 	}
 
-	resUTCSrc := cfgUTC.replaceAttr(nil, srcAttr)
+	resUTCSrc := replaceAttrUTC(nil, srcAttr)
 	expectedSrcStr := "log/logger_test.go:229"
 	if resUTCSrc.Value.String() != expectedSrcStr {
 		t.Errorf("replaceAttr UTC source = %s, want %s", resUTCSrc.Value.String(), expectedSrcStr)
 	}
 
 	// Test Local replaceAttr
-	resLocal := cfgLocal.replaceAttr(nil, timeAttr)
+	replaceAttrLocal := cfgLocal.getReplaceAttr()
+	resLocal := replaceAttrLocal(nil, timeAttr)
 	expectedLocalStr := testTime.Local().Format(customTimeLayout)
 	if resLocal.Value.String() != expectedLocalStr {
 		t.Errorf("replaceAttr Local time = %s, want %s", resLocal.Value.String(), expectedLocalStr)
 	}
 
-	resLocalStr := cfgLocal.replaceAttr(nil, strAttr)
+	resLocalStr := replaceAttrLocal(nil, strAttr)
 	if resLocalStr.Key != "key" || resLocalStr.Value.String() != "val" {
 		t.Errorf("replaceAttr Local non-time attr modified: %v", resLocalStr)
 	}
 
-	resLocalSrc := cfgLocal.replaceAttr(nil, srcAttr)
+	resLocalSrc := replaceAttrLocal(nil, srcAttr)
 	if resLocalSrc.Value.String() != expectedSrcStr {
 		t.Errorf("replaceAttr Local source = %s, want %s", resLocalSrc.Value.String(), expectedSrcStr)
+	}
+
+	// Test invalid / nil source attrs
+	resNonSrc := replaceAttrUTC(nil, nonSrcAttr)
+	if resNonSrc.Value.String() != "invalid_source" {
+		t.Errorf("replaceAttr non-Source source key modified unexpectedly: %v", resNonSrc)
+	}
+
+	resNilSrc := replaceAttrUTC(nil, nilSrcAttr)
+	if resNilSrc.Value.Any() != (*slog.Source)(nil) {
+		t.Errorf("replaceAttr nil Source modified unexpectedly: %v", resNilSrc)
+	}
+
+	// Test Custom ReplaceAttr override
+	customCalled := false
+	customReplace := func(groups []string, a slog.Attr) slog.Attr {
+		customCalled = true
+		return slog.String(a.Key, "custom_"+a.Value.String())
+	}
+	cfgCustom := &LogConfig{ReplaceAttr: customReplace}
+	resCustom := cfgCustom.getReplaceAttr()(nil, strAttr)
+	if !customCalled || resCustom.Value.String() != "custom_val" {
+		t.Errorf("expected custom ReplaceAttr to be invoked, got: %v", resCustom)
 	}
 }
 
