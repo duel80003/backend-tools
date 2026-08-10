@@ -46,11 +46,45 @@ func TestGormToELK(t *testing.T) {
 	}
 	elkLogger.Trace(ctx, time.Now(), fcErr, errors.New("table not found"))
 
-	// Test Trace - Truncated SQL (> 50 chars)
+	// Test Trace - Truncated SQL (> 500 chars default)
 	fcLongSQL := func() (string, int64) {
 		return "SELECT id, username, email, created_at, updated_at FROM users WHERE active = true AND deleted_at IS NULL ORDER BY created_at DESC", 10
 	}
 	elkLogger.Trace(ctx, time.Now(), fcLongSQL, nil)
+
+	// Test Trace with custom MaxSQLLength via SetMaxSQLLength and UTF-8 characters
+	customLenELK := NewGormToELK().SetMaxSQLLength(10)
+	fcUTF8 := func() (string, int64) {
+		return "SELECT * FROM 用户表 WHERE 名字 = '张三丰'", 1
+	}
+	customLenELK.Trace(ctx, time.Now(), fcUTF8, nil)
+
+	// Test NewGormToELK with direct GormOption and LoggerOption
+	directOptELK := NewGormToELK(WithMaxSQLLength(250), WithLevel("debug"), WithSlowThreshold(100*time.Millisecond))
+	if directOptELK.MaxSQLLength != 250 {
+		t.Errorf("expected MaxSQLLength 250, got %d", directOptELK.MaxSQLLength)
+	}
+	if directOptELK.SlowThreshold != 100*time.Millisecond {
+		t.Errorf("expected SlowThreshold 100ms, got %v", directOptELK.SlowThreshold)
+	}
+
+	// Test Trace with unlimited SQL length (-1)
+	unlimitedELK := NewGormToELK()
+	unlimitedELK.MaxSQLLength = -1
+	unlimitedELK.Trace(ctx, time.Now(), fcLongSQL, nil)
+
+	// Test Trace with Silent LogLevel (fc should not panic or execute unnecessary work)
+	silentCalled := false
+	fcSilent := func() (string, int64) {
+		silentCalled = true
+		return "SELECT 1", 1
+	}
+	silentELK := NewGormToELK()
+	silentELK.LogLevel = logger.Silent
+	silentELK.Trace(ctx, time.Now(), fcSilent, nil)
+	if silentCalled {
+		t.Error("expected fc not to be called when LogLevel is Silent")
+	}
 
 	// Test Trace with Caller context key
 	ctxWithCaller := context.WithValue(ctx, Caller, "TestCustomCallerFunc")
@@ -74,3 +108,4 @@ func TestGormToELK(t *testing.T) {
 	nilLogELK.Error(ctx, "error test")
 	nilLogELK.Trace(ctx, time.Now(), fc, nil)
 }
+

@@ -13,10 +13,14 @@ import (
 
 type contextKey string
 
-const Caller contextKey = "caller"
+const (
+	Caller              contextKey = "caller"
+	defaultMaxSQLLength int        = 500
+)
 
 type GormToELK struct {
-	Log *slog.Logger
+	Log          *slog.Logger
+	MaxSQLLength int
 	logger.Config
 }
 
@@ -57,10 +61,23 @@ func (l *GormToELK) Error(ctx context.Context, s string, i ...any) {
 }
 
 func (l *GormToELK) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	if l.LogLevel <= logger.Silent {
+		return
+	}
+
 	elapsed := time.Since(begin)
 	sql, rows := fc()
-	if len(sql) > 50 {
-		sql = sql[:50]
+
+	maxLen := l.MaxSQLLength
+	if maxLen == 0 {
+		maxLen = defaultMaxSQLLength
+	}
+
+	if maxLen > 0 && len(sql) > maxLen {
+		runes := []rune(sql)
+		if len(runes) > maxLen {
+			sql = string(runes[:maxLen]) + "..."
+		}
 	}
 
 	log := l.Log
@@ -92,9 +109,7 @@ func getCallerFunctionName(ctx context.Context) string {
 		if alias, ok := ctx.Value(Caller).(string); ok {
 			return alias
 		}
-		if alias, ok := ctx.Value("caller").(string); ok {
-			return alias
-		}
+		return "caller unknown"
 	}
 
 	pc := make([]uintptr, 15)
@@ -114,16 +129,74 @@ func getCallerFunctionName(ctx context.Context) string {
 	return "unknown"
 }
 
-func NewGormToELK(opts ...LoggerOption) *GormToELK {
-	logOpts := append([]LoggerOption{WithOutputType(OutputTypeJSON)}, opts...)
-	return &GormToELK{
-		Log: New(logOpts...),
+type GormOption func(*GormToELK)
+
+// WithMaxSQLLength creates a GormOption to set MaxSQLLength.
+// Set to 0 for default (500), or -1 for unlimited length.
+func WithMaxSQLLength(maxLen int) GormOption {
+	return func(l *GormToELK) {
+		l.MaxSQLLength = maxLen
+	}
+}
+
+// WithSlowThreshold sets the slow query threshold.
+func WithSlowThreshold(d time.Duration) GormOption {
+	return func(l *GormToELK) {
+		l.SlowThreshold = d
+	}
+}
+
+// WithGormLogLevel sets the GORM log level.
+func WithGormLogLevel(level logger.LogLevel) GormOption {
+	return func(l *GormToELK) {
+		l.LogLevel = level
+	}
+}
+
+// WithSlogLogger sets a custom *slog.Logger instance.
+func WithSlogLogger(log *slog.Logger) GormOption {
+	return func(l *GormToELK) {
+		l.Log = log
+	}
+}
+
+// NewGormToELK initializes a GormToELK logger instance.
+// Accepts both GormOption (e.g. WithMaxSQLLength, WithSlowThreshold) and LoggerOption (e.g. WithLevel).
+func NewGormToELK(opts ...any) *GormToELK {
+	var loggerOpts []LoggerOption
+	var gormOpts []GormOption
+
+	for _, opt := range opts {
+		switch o := opt.(type) {
+		case GormOption:
+			gormOpts = append(gormOpts, o)
+		case func(*GormToELK):
+			gormOpts = append(gormOpts, o)
+		case LoggerOption:
+			loggerOpts = append(loggerOpts, o)
+		case func(*LogConfig):
+			loggerOpts = append(loggerOpts, o)
+		}
+	}
+
+	logOpts := append([]LoggerOption{WithOutputType(OutputTypeJSON)}, loggerOpts...)
+	g := &GormToELK{
+		Log:          New(logOpts...),
+		MaxSQLLength: defaultMaxSQLLength,
 		Config: logger.Config{
 			SlowThreshold: 200 * time.Millisecond, // Slow SQL threshold
 			LogLevel:      logger.Info,            // Log level
 			Colorful:      false,
 		},
 	}
+
+	for _, opt := range gormOpts {
+		if opt != nil {
+			opt(g)
+		}
+	}
+
+	return g
 }
 
 func getLogger() *GormToELK {
@@ -135,4 +208,21 @@ func LogDBDefaultReplaceAttr(groups []string, a slog.Attr) slog.Attr {
 		return a
 	}
 	return slog.Attr{}
+}
+
+// SetMaxSQLLength sets the max length of SQL string logged in Trace.
+// Set to 0 for default (500), or -1 for unlimited length.
+func (l *GormToELK) SetMaxSQLLength(maxLen int) *GormToELK {
+	l.MaxSQLLength = maxLen
+	return l
+}
+
+// WithGormOptions applies GormOptions to GormToELK.
+func (l *GormToELK) WithGormOptions(opts ...GormOption) *GormToELK {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(l)
+		}
+	}
+	return l
 }
