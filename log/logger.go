@@ -1,18 +1,25 @@
 package logger
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 const (
 	customTimeLayout = "2006-01-02 15:04:05.000"
 )
 
-var workDir string
+var (
+	defaultLogger atomic.Pointer[slog.Logger]
+	workDir       string
+)
 
 func init() {
 	if wd, err := os.Getwd(); err == nil {
@@ -71,7 +78,8 @@ type LogConfig struct {
 	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
 }
 
-// New creates and returns a new custom *slog.Logger instance configured with the provided options.
+// New creates and returns a brand-new independent *slog.Logger instance.
+// Calling New NEVER modifies or affects the global default logger.
 func New(opts ...LoggerOption) *slog.Logger {
 	config := &LogConfig{}
 	for _, opt := range opts {
@@ -82,9 +90,80 @@ func New(opts ...LoggerOption) *slog.Logger {
 	return slog.New(getHandler(config))
 }
 
-// NewLogger is an alias for New to create a custom *slog.Logger instance.
-func NewLogger(opts ...LoggerOption) *slog.Logger {
-	return New(opts...)
+// LoggerInit initializes or updates the global default logger.
+func LoggerInit(opts ...LoggerOption) {
+	defaultLogger.Store(New(opts...))
+}
+
+// GetLogger returns the global default logger, lazily initializing it if not yet set.
+func GetLogger() *slog.Logger {
+	if l := defaultLogger.Load(); l != nil {
+		return l
+	}
+	// Fallback lazy initialization if LoggerInit was not called
+	l := New()
+	if defaultLogger.CompareAndSwap(nil, l) {
+		return l
+	}
+	return defaultLogger.Load()
+}
+
+func logAt(ctx context.Context, level slog.Level, msg string, args ...any) {
+	l := GetLogger()
+	if !l.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.Add(args...)
+	_ = l.Handler().Handle(ctx, r)
+}
+
+func logAttrsAt(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	l := GetLogger()
+	if !l.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.AddAttrs(attrs...)
+	_ = l.Handler().Handle(ctx, r)
+}
+
+// Global convenience logging functions
+
+func Info(msg string, args ...any) {
+	logAt(context.Background(), slog.LevelInfo, msg, args...)
+}
+
+func Debug(msg string, args ...any) {
+	logAt(context.Background(), slog.LevelDebug, msg, args...)
+}
+
+func Warn(msg string, args ...any) {
+	logAt(context.Background(), slog.LevelWarn, msg, args...)
+}
+
+func Error(msg string, args ...any) {
+	logAt(context.Background(), slog.LevelError, msg, args...)
+}
+
+func Log(ctx context.Context, level slog.Level, msg string, args ...any) {
+	logAt(ctx, level, msg, args...)
+}
+
+func LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	logAttrsAt(ctx, level, msg, attrs...)
+}
+
+func With(args ...any) *slog.Logger {
+	return GetLogger().With(args...)
+}
+
+func WithGroup(name string) *slog.Logger {
+	return GetLogger().WithGroup(name)
 }
 
 func formatSource(source *slog.Source, maxParts int) string {

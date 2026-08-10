@@ -17,13 +17,14 @@ A lightweight, high-performance set of backend utilities for Go applications, pr
 
 ### `log` - Structured Logging Package
 
-The `log` package provides a stateless factory for creating structured `*slog.Logger` instances built on Go's standard `log/slog`.
+The `log` package provides lock-free global logging functions (`logger.Info`, `logger.Debug`, `logger.Error`) as well as constructors for creating isolated custom loggers (`logger.New(...)`).
 
 #### Features
-- **Stateless & Thread-Safe**: No global default logger singletons or hidden package-level state.
-- **Functional Options**: Configure log level, output format (JSON/Text), time zone (UTC/Local), custom `ReplaceAttr`, and source path depth.
+- **Global Convenience Functions**: Log anywhere in your app via `logger.Info()`, `logger.Debug()`, `logger.Warn()`, `logger.Error()`.
+- **Lock-Free Atomic Global State**: Global logger reads use lock-free `atomic.Pointer` for maximum performance.
+- **Isolated Custom Loggers**: Constructing custom loggers via `logger.New(...)` (e.g., JSON loggers for Kibana) **never touches or interferes with** the global default logger.
+- **Accurate Caller Depth**: Package-level log wrappers accurately report caller source line numbers (`main.go:20` instead of wrapper file lines).
 - **Customizable Source Formatting**: Formats source file paths relative to the project working directory without leading slashes and caps path depth to configurable limits (e.g. `log/logger.go:127`).
-- **High Performance**: Optimized with cached working directory and zero-allocation path trimming.
 
 #### Usage Example
 
@@ -38,18 +39,20 @@ import (
 )
 
 func main() {
-	// Create a Text logger instance (for console output)
-	consoleLogger := logger.New(
+	// 1. Initialize global default logger (for application-wide console logging)
+	logger.LoggerInit(
 		logger.WithLevel("debug"),
-		logger.WithOutputType(logger.OutputTypeText), // OutputTypeText or OutputTypeJSON
+		logger.WithOutputType(logger.OutputTypeText),
 		logger.WithTimeZone(logger.OutputTimeZoneLocal),
 		logger.WithMaxParts(2),
 	)
 
-	consoleLogger.Info("server starting", slog.Int("port", 8080))
-	consoleLogger.Debug("debugging request", slog.String("path", "/api/v1/health"))
+	// Direct global logging anywhere in your project
+	logger.Info("server starting", slog.Int("port", 8080))
+	logger.Debug("debugging request", slog.String("path", "/api/v1/health"))
 
-	// Create a JSON logger instance (for Kibana / log analytics)
+	// 2. Create an independent custom logger (e.g. JSON format for Kibana)
+	// Calling logger.New(...) NEVER modifies the global default logger!
 	kibanaLogger := logger.New(
 		logger.WithLevel("info"),
 		logger.WithOutputType(logger.OutputTypeJSON),
@@ -61,13 +64,9 @@ func main() {
 		slog.Float64("amount", 99.95),
 	)
 
-	// Context-aware logging
+	// Context-aware global logging
 	ctx := context.Background()
-	kibanaLogger.InfoContext(ctx, "context log", slog.String("trace_id", "abc-123"))
-
-	// Sub-loggers with pre-attached attributes or groups
-	authLogger := consoleLogger.With(slog.String("component", "auth"))
-	authLogger.Info("user logged in")
+	logger.Log(ctx, slog.LevelInfo, "context log", slog.String("trace_id", "abc-123"))
 }
 ```
 

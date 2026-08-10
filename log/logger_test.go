@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -295,14 +296,97 @@ func TestNewCustomLogger(t *testing.T) {
 	}
 
 	custom1.Info("test custom1", slog.String("key", "val"))
+}
 
-	custom2 := NewLogger(
-		WithLevel("warn"),
-		WithOutputType(OutputTypeJSON),
-	)
-	if custom2 == nil {
-		t.Fatal("expected non-nil custom logger from NewLogger()")
+func TestLoggerInit(t *testing.T) {
+	defaultLogger.Store(nil)
+
+	lLazy := GetLogger()
+	if lLazy == nil {
+		t.Fatal("expected GetLogger() to lazily initialize default logger")
 	}
 
-	custom2.Warn("test custom2", slog.String("key", "val"))
+	LoggerInit(
+		WithLevel("debug"),
+		WithOutputType(OutputTypeText),
+		WithTimeZone(OutputTimeZoneLocal),
+		WithMaxParts(2),
+	)
+
+	lInit := GetLogger()
+	if lInit == nil {
+		t.Fatal("expected GetLogger() to return non-nil after LoggerInit")
+	}
+}
+
+func TestPackageLevelLogging(t *testing.T) {
+	LoggerInit(WithLevel("debug"))
+	ctx := context.Background()
+
+	Info("info log", slog.String("key", "val"))
+	Debug("debug log", slog.String("key", "val"))
+	Warn("warn log", slog.String("key", "val"))
+	Error("error log", slog.String("key", "val"))
+
+	Log(ctx, slog.LevelInfo, "log msg", slog.String("key", "val"))
+	LogAttrs(ctx, slog.LevelInfo, "log attrs msg", slog.String("key", "val"))
+
+	wLogger := With(slog.String("component", "test"))
+	if wLogger == nil {
+		t.Error("expected non-nil logger from With()")
+	}
+
+	gLogger := WithGroup("group1")
+	if gLogger == nil {
+		t.Error("expected non-nil logger from WithGroup()")
+	}
+
+	// Test disabled log level branch
+	LoggerInit(WithLevel("error"))
+	Debug("disabled debug log")
+	Log(ctx, slog.LevelDebug, "disabled log")
+	LogAttrs(ctx, slog.LevelDebug, "disabled log attrs")
+}
+
+func TestDefaultAndCustomLoggersTogether(t *testing.T) {
+	// Initialize default logger with TEXT output and INFO level
+	LoggerInit(
+		WithLevel("info"),
+		WithOutputType(OutputTypeText),
+		WithTimeZone(OutputTimeZoneLocal),
+		WithMaxParts(2),
+	)
+
+	defaultPtrBefore := GetLogger()
+
+	// Create custom logger with JSON output and DEBUG level
+	customJSONLogger := New(
+		WithLevel("debug"),
+		WithOutputType(OutputTypeJSON),
+		WithTimeZone(OutputTimeZoneUTC),
+		WithMaxParts(3),
+	)
+
+	// Verify creating custom logger did NOT change default logger
+	if GetLogger() != defaultPtrBefore {
+		t.Error("expected default logger instance to remain unchanged after calling New()")
+	}
+
+	ctx := context.Background()
+
+	// Default logger at INFO level: Debug should be disabled
+	if GetLogger().Enabled(ctx, slog.LevelDebug) {
+		t.Error("expected default logger to have DEBUG disabled")
+	}
+
+	// Custom logger at DEBUG level: Debug should be enabled
+	if !customJSONLogger.Enabled(ctx, slog.LevelDebug) {
+		t.Error("expected custom logger to have DEBUG enabled")
+	}
+
+	// Log with default logger
+	Info("default logger info event", slog.String("env", "prod"))
+
+	// Log with custom logger
+	customJSONLogger.Debug("custom logger debug event", slog.String("component", "kibana"))
 }
