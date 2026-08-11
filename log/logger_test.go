@@ -417,7 +417,7 @@ func TestWithAndGetRequestID(t *testing.T) {
 	}
 
 	// Test WithRequestID with nil context
-	nilCtxWithID := WithRequestID(nil, "req-1111")
+	nilCtxWithID := WithRequestID(context.TODO(), "req-1111")
 	if id := GetRequestID(nilCtxWithID); id != "req-1111" {
 		t.Errorf("expected 'req-1111', got %q", id)
 	}
@@ -496,4 +496,3 @@ func TestCustomRequestIDExtractor(t *testing.T) {
 		t.Errorf("expected output to contain request_id from custom extractor, got: %s", out)
 	}
 }
-

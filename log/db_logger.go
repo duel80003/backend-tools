@@ -203,7 +203,7 @@ func getLogger() *GormToELK {
 }
 
 func LogDBDefaultReplaceAttr(groups []string, a slog.Attr) slog.Attr {
-	if a.Key == "func" || a.Key == "latency_ms" {
+	if a.Key == "func" || a.Key == "latency_ms" || a.Key == "query" {
 		return a
 	}
 	return slog.Attr{}
