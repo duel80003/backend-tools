@@ -16,20 +16,19 @@ A lightweight, high-performance set of backend utilities for Go applications, pr
 
 ### `log` - Structured Logging Package
 
-The `log` package provides lock-free global logging functions (`logger.Info`, `logger.Debug`, `logger.Error`), context-aware logging (`logger.InfoContext`, `logger.Log`), Request ID HTTP middleware (`logger.RequestIDMiddleware`), as well as constructors for creating isolated custom loggers (`logger.New(...)`).
+The `log` package provides lock-free global logging functions (`logger.Info`, `logger.Debug`, `logger.Error`), context-aware logging (`logger.InfoContext`, `logger.Log`), as well as constructors for creating isolated custom loggers (`logger.New(...)`).
 
 #### Features
 - **Global Convenience Functions**: Log anywhere in your app via `logger.Info()`, `logger.Debug()`, `logger.Warn()`, `logger.Error()`.
 - **Context-Aware Logging**: Log with context via `logger.InfoContext(ctx, ...)`, `logger.DebugContext(ctx, ...)`, `logger.WarnContext(ctx, ...)`, `logger.ErrorContext(ctx, ...)`.
-- **Request ID Life Cycle & Middleware**: HTTP middleware (`logger.RequestIDMiddleware`) that extracts or generates a unique Request ID (UUID v4), injects it into `context.Context`, and sets `X-Request-ID` in HTTP response headers.
-- **Automatic Request ID Log Injection**: `log/slog` handlers automatically extract `request_id` from `context.Context` and append it to all log entries (including database query logs via GORM logger).
+- **Automatic Request ID Log Injection**: `log/slog` handlers automatically extract `request_id` from `context.Context` (via `logger.WithRequestID(ctx, id)`) and append it to all log entries (including database query logs via GORM logger).
 - **Customizable Request ID Extractor**: Configure custom context keys or framework extractors via `logger.WithRequestIDExtractor(...)`.
 - **Lock-Free Atomic Global State**: Global logger reads use lock-free `atomic.Pointer` for maximum performance.
 - **Isolated Custom Loggers**: Constructing custom loggers via `logger.New(...)` (e.g., JSON loggers for Kibana) **never touches or interferes with** the global default logger.
 - **Accurate Caller Depth**: Package-level log wrappers accurately report caller source line numbers (`main.go:20` instead of wrapper file lines).
 - **Customizable Source Formatting**: Formats source file paths relative to the project working directory without leading slashes and caps path depth to configurable limits (e.g. `log/logger.go:127`).
 
-#### Basic Usage Example
+#### Usage Example
 
 ```go
 package main
@@ -54,7 +53,13 @@ func main() {
 	logger.Info("server starting", slog.Int("port", 8080))
 	logger.Debug("debugging request", slog.String("path", "/api/v1/health"))
 
-	// 2. Create an independent custom logger (e.g. JSON format for Kibana)
+	// 2. Attach Request ID to Context
+	ctx := logger.WithRequestID(context.Background(), "req-abc-123")
+
+	// Context-aware global logging (automatically includes request_id in logs)
+	logger.InfoContext(ctx, "processing request", slog.String("user_id", "usr_101"))
+
+	// 3. Create an independent custom logger (e.g. JSON format for Kibana)
 	// Calling logger.New(...) NEVER modifies the global default logger!
 	kibanaLogger := logger.New(
 		logger.WithLevel("info"),
@@ -62,46 +67,10 @@ func main() {
 		logger.WithTimeZone(logger.OutputTimeZoneUTC),
 	)
 
-	kibanaLogger.Info("user_payment",
+	kibanaLogger.InfoContext(ctx, "user_payment",
 		slog.String("user_id", "usr_123"),
 		slog.Float64("amount", 99.95),
 	)
-
-	// Context-aware global logging
-	ctx := context.Background()
-	logger.Log(ctx, slog.LevelInfo, "context log", slog.String("trace_id", "abc-123"))
-}
-```
-
-#### Request Life Cycle & Middleware Example
-
-```go
-package main
-
-import (
-	"net/http"
-
-	logger "github.com/duel80003/backend-tools/log"
-)
-
-func main() {
-	// Initialize global logger with JSON output
-	logger.LoggerInit(logger.WithOutputType(logger.OutputTypeJSON))
-
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		// Output log automatically includes request_id from ctx:
-		// {"time":"...","level":"INFO","msg":"fetching users","request_id":"c6f3796d-..."}
-		logger.InfoContext(ctx, "fetching users")
-
-		w.Write([]byte(`{"status":"ok"}`))
-	})
-
-	// Wrap server with RequestIDMiddleware
-	http.ListenAndServe(":8080", logger.RequestIDMiddleware(mux))
 }
 ```
 

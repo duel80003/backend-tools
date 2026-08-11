@@ -2,10 +2,7 @@ package logger
 
 import (
 	"context"
-	"crypto/rand"
-	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,7 +14,6 @@ import (
 
 const (
 	customTimeLayout = "2006-01-02 15:04:05.000"
-	HeaderXRequestID = "X-Request-ID"
 	RequestIDKey     = contextKey("request_id")
 )
 
@@ -159,32 +155,6 @@ func (h *contextHandler) WithGroup(name string) slog.Handler {
 		handler:   h.handler.WithGroup(name),
 		extractor: h.extractor,
 	}
-}
-
-// RequestIDMiddleware is an HTTP middleware that extracts or generates a Request ID
-// for each incoming request, attaches it to the request context, and sets the X-Request-ID response header.
-func RequestIDMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqID := r.Header.Get(HeaderXRequestID)
-		if reqID == "" {
-			reqID = generateUUID()
-		}
-
-		ctx := WithRequestID(r.Context(), reqID)
-		w.Header().Set(HeaderXRequestID, reqID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func generateUUID() string {
-	var uuid [16]byte
-	_, err := rand.Read(uuid[:])
-	if err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 16)
-	}
-	uuid[6] = (uuid[6] & 0x0f) | 0x40
-	uuid[8] = (uuid[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
 }
 
 // New creates and returns a brand-new independent *slog.Logger instance.

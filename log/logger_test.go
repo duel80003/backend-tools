@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -497,56 +495,5 @@ func TestCustomRequestIDExtractor(t *testing.T) {
 	if !strings.Contains(out, `"request_id":"custom-id-777"`) {
 		t.Errorf("expected output to contain request_id from custom extractor, got: %s", out)
 	}
-}
-
-func TestRequestIDMiddleware(t *testing.T) {
-	t.Run("Generate new Request ID when header is missing", func(t *testing.T) {
-		var capturedReqID string
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			capturedReqID = GetRequestID(r.Context())
-			w.WriteHeader(http.StatusOK)
-		})
-
-		middlewareHandler := RequestIDMiddleware(handler)
-
-		req := httptest.NewRequest("GET", "/test", nil)
-		rec := httptest.NewRecorder()
-
-		middlewareHandler.ServeHTTP(rec, req)
-
-		if capturedReqID == "" {
-			t.Error("expected non-empty request ID to be set in context")
-		}
-
-		respHeaderID := rec.Header().Get(HeaderXRequestID)
-		if respHeaderID != capturedReqID {
-			t.Errorf("expected response header X-Request-ID %q, got %q", capturedReqID, respHeaderID)
-		}
-	})
-
-	t.Run("Preserve existing X-Request-ID from request header", func(t *testing.T) {
-		var capturedReqID string
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			capturedReqID = GetRequestID(r.Context())
-			w.WriteHeader(http.StatusOK)
-		})
-
-		middlewareHandler := RequestIDMiddleware(handler)
-
-		req := httptest.NewRequest("GET", "/test", nil)
-		req.Header.Set(HeaderXRequestID, "existing-req-id-12345")
-		rec := httptest.NewRecorder()
-
-		middlewareHandler.ServeHTTP(rec, req)
-
-		if capturedReqID != "existing-req-id-12345" {
-			t.Errorf("expected captured request ID 'existing-req-id-12345', got %q", capturedReqID)
-		}
-
-		respHeaderID := rec.Header().Get(HeaderXRequestID)
-		if respHeaderID != "existing-req-id-12345" {
-			t.Errorf("expected response header X-Request-ID 'existing-req-id-12345', got %q", respHeaderID)
-		}
-	})
 }
 
