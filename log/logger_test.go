@@ -1,9 +1,13 @@
 package logger
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,6 +39,12 @@ func TestOptions(t *testing.T) {
 	WithReplaceAttr(customReplace)(config)
 	if config.ReplaceAttr == nil {
 		t.Error("expected ReplaceAttr to be set")
+	}
+
+	customExtractor := func(ctx context.Context) string { return "test-id" }
+	WithRequestIDExtractor(customExtractor)(config)
+	if config.RequestIDExtractor == nil || config.RequestIDExtractor(context.Background()) != "test-id" {
+		t.Error("expected RequestIDExtractor to be set correctly")
 	}
 }
 
@@ -323,6 +333,11 @@ func TestPackageLevelLogging(t *testing.T) {
 	Warn("warn log", slog.String("key", "val"))
 	Error("error log", slog.String("key", "val"))
 
+	InfoContext(ctx, "info context log", slog.String("key", "val"))
+	DebugContext(ctx, "debug context log", slog.String("key", "val"))
+	WarnContext(ctx, "warn context log", slog.String("key", "val"))
+	ErrorContext(ctx, "error context log", slog.String("key", "val"))
+
 	Log(ctx, slog.LevelInfo, "log msg", slog.String("key", "val"))
 	LogAttrs(ctx, slog.LevelInfo, "log attrs msg", slog.String("key", "val"))
 
@@ -339,6 +354,7 @@ func TestPackageLevelLogging(t *testing.T) {
 	// Test disabled log level branch
 	LoggerInit(WithLevel("error"))
 	Debug("disabled debug log")
+	DebugContext(ctx, "disabled debug context log")
 	Log(ctx, slog.LevelDebug, "disabled log")
 	LogAttrs(ctx, slog.LevelDebug, "disabled log attrs")
 }
@@ -385,3 +401,152 @@ func TestDefaultAndCustomLoggersTogether(t *testing.T) {
 	// Log with custom logger
 	customJSONLogger.Debug("custom logger debug event", slog.String("component", "kibana"))
 }
+
+func TestWithAndGetRequestID(t *testing.T) {
+	ctx := context.Background()
+
+	if id := GetRequestID(ctx); id != "" {
+		t.Errorf("expected empty request ID for default context, got %q", id)
+	}
+
+	if id := GetRequestID(nil); id != "" {
+		t.Errorf("expected empty request ID for nil context, got %q", id)
+	}
+
+	ctxWithID := WithRequestID(ctx, "req-9999")
+	if id := GetRequestID(ctxWithID); id != "req-9999" {
+		t.Errorf("expected 'req-9999', got %q", id)
+	}
+
+	// Test WithRequestID with nil context
+	nilCtxWithID := WithRequestID(nil, "req-1111")
+	if id := GetRequestID(nilCtxWithID); id != "req-1111" {
+		t.Errorf("expected 'req-1111', got %q", id)
+	}
+}
+
+func TestContextHandlerRequestID(t *testing.T) {
+	var buf bytes.Buffer
+	options := slog.HandlerOptions{}
+	baseHandler := slog.NewJSONHandler(&buf, &options)
+	handler := &contextHandler{
+		handler:   baseHandler,
+		extractor: DefaultRequestIDExtractor,
+	}
+
+	l := slog.New(handler)
+	ctx := WithRequestID(context.Background(), "req-abc-123")
+
+	l.InfoContext(ctx, "test request context log")
+
+	out := buf.String()
+	if !strings.Contains(out, `"request_id":"req-abc-123"`) {
+		t.Errorf("expected output to contain request_id attribute, got: %s", out)
+	}
+}
+
+func TestContextHandlerWithAttrsAndGroup(t *testing.T) {
+	var buf bytes.Buffer
+	baseHandler := slog.NewJSONHandler(&buf, nil)
+	handler := &contextHandler{
+		handler:   baseHandler,
+		extractor: DefaultRequestIDExtractor,
+	}
+
+	l := slog.New(handler).With("env", "test").WithGroup("subsystem")
+	ctx := WithRequestID(context.Background(), "req-group-test")
+
+	l.InfoContext(ctx, "grouped log message")
+
+	out := buf.String()
+	if !strings.Contains(out, `"request_id":"req-group-test"`) {
+		t.Errorf("expected output to contain request_id in grouped logger, got: %s", out)
+	}
+	if !strings.Contains(out, `"env":"test"`) {
+		t.Errorf("expected output to contain env attribute, got: %s", out)
+	}
+}
+
+func TestCustomRequestIDExtractor(t *testing.T) {
+	type customKey string
+	cKey := customKey("my_custom_id")
+
+	customExtractor := func(ctx context.Context) string {
+		if ctx == nil {
+			return ""
+		}
+		if id, ok := ctx.Value(cKey).(string); ok {
+			return id
+		}
+		return ""
+	}
+
+	var buf bytes.Buffer
+	baseHandler := slog.NewJSONHandler(&buf, nil)
+	handler := &contextHandler{
+		handler:   baseHandler,
+		extractor: customExtractor,
+	}
+
+	l := slog.New(handler)
+	ctx := context.WithValue(context.Background(), cKey, "custom-id-777")
+
+	l.InfoContext(ctx, "test custom extractor")
+
+	out := buf.String()
+	if !strings.Contains(out, `"request_id":"custom-id-777"`) {
+		t.Errorf("expected output to contain request_id from custom extractor, got: %s", out)
+	}
+}
+
+func TestRequestIDMiddleware(t *testing.T) {
+	t.Run("Generate new Request ID when header is missing", func(t *testing.T) {
+		var capturedReqID string
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedReqID = GetRequestID(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		middlewareHandler := RequestIDMiddleware(handler)
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		middlewareHandler.ServeHTTP(rec, req)
+
+		if capturedReqID == "" {
+			t.Error("expected non-empty request ID to be set in context")
+		}
+
+		respHeaderID := rec.Header().Get(HeaderXRequestID)
+		if respHeaderID != capturedReqID {
+			t.Errorf("expected response header X-Request-ID %q, got %q", capturedReqID, respHeaderID)
+		}
+	})
+
+	t.Run("Preserve existing X-Request-ID from request header", func(t *testing.T) {
+		var capturedReqID string
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedReqID = GetRequestID(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		middlewareHandler := RequestIDMiddleware(handler)
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(HeaderXRequestID, "existing-req-id-12345")
+		rec := httptest.NewRecorder()
+
+		middlewareHandler.ServeHTTP(rec, req)
+
+		if capturedReqID != "existing-req-id-12345" {
+			t.Errorf("expected captured request ID 'existing-req-id-12345', got %q", capturedReqID)
+		}
+
+		respHeaderID := rec.Header().Get(HeaderXRequestID)
+		if respHeaderID != "existing-req-id-12345" {
+			t.Errorf("expected response header X-Request-ID 'existing-req-id-12345', got %q", respHeaderID)
+		}
+	})
+}
+

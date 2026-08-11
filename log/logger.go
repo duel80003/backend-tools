@@ -2,7 +2,10 @@ package logger
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +17,8 @@ import (
 
 const (
 	customTimeLayout = "2006-01-02 15:04:05.000"
+	HeaderXRequestID = "X-Request-ID"
+	RequestIDKey     = contextKey("request_id")
 )
 
 const (
@@ -51,6 +56,32 @@ func (ll LogLevel) toLower() LogLevel {
 type OutputType int
 type OutputTimeZone int
 
+type RequestIDExtractor func(ctx context.Context) string
+
+// WithRequestID returns a new Context carrying the given requestID.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, RequestIDKey, requestID)
+}
+
+// GetRequestID retrieves the request ID from ctx, returning an empty string if missing.
+func GetRequestID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if id, ok := ctx.Value(RequestIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// DefaultRequestIDExtractor is the default extractor that retrieves request ID from ctx.
+func DefaultRequestIDExtractor(ctx context.Context) string {
+	return GetRequestID(ctx)
+}
+
 type LoggerOption func(*LogConfig)
 
 func WithLevel(level LogLevel) LoggerOption {
@@ -83,12 +114,77 @@ func WithReplaceAttr(replaceAttr func(groups []string, a slog.Attr) slog.Attr) L
 	}
 }
 
+func WithRequestIDExtractor(extractor RequestIDExtractor) LoggerOption {
+	return func(c *LogConfig) {
+		c.RequestIDExtractor = extractor
+	}
+}
+
 type LogConfig struct {
-	Level       LogLevel
-	OutputType  OutputType
-	TimeZone    OutputTimeZone
-	MaxParts    int
-	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
+	Level              LogLevel
+	OutputType         OutputType
+	TimeZone           OutputTimeZone
+	MaxParts           int
+	ReplaceAttr        func(groups []string, a slog.Attr) slog.Attr
+	RequestIDExtractor RequestIDExtractor
+}
+
+type contextHandler struct {
+	handler   slog.Handler
+	extractor RequestIDExtractor
+}
+
+func (h *contextHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.handler.Enabled(ctx, level)
+}
+
+func (h *contextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if ctx != nil && h.extractor != nil {
+		if reqID := h.extractor(ctx); reqID != "" {
+			r.AddAttrs(slog.String("request_id", reqID))
+		}
+	}
+	return h.handler.Handle(ctx, r)
+}
+
+func (h *contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &contextHandler{
+		handler:   h.handler.WithAttrs(attrs),
+		extractor: h.extractor,
+	}
+}
+
+func (h *contextHandler) WithGroup(name string) slog.Handler {
+	return &contextHandler{
+		handler:   h.handler.WithGroup(name),
+		extractor: h.extractor,
+	}
+}
+
+// RequestIDMiddleware is an HTTP middleware that extracts or generates a Request ID
+// for each incoming request, attaches it to the request context, and sets the X-Request-ID response header.
+func RequestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get(HeaderXRequestID)
+		if reqID == "" {
+			reqID = generateUUID()
+		}
+
+		ctx := WithRequestID(r.Context(), reqID)
+		w.Header().Set(HeaderXRequestID, reqID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func generateUUID() string {
+	var uuid [16]byte
+	_, err := rand.Read(uuid[:])
+	if err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	uuid[6] = (uuid[6] & 0x0f) | 0x40
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
 }
 
 // New creates and returns a brand-new independent *slog.Logger instance.
@@ -161,6 +257,22 @@ func Warn(msg string, args ...any) {
 
 func Error(msg string, args ...any) {
 	logAt(context.Background(), slog.LevelError, msg, args...)
+}
+
+func InfoContext(ctx context.Context, msg string, args ...any) {
+	logAt(ctx, slog.LevelInfo, msg, args...)
+}
+
+func DebugContext(ctx context.Context, msg string, args ...any) {
+	logAt(ctx, slog.LevelDebug, msg, args...)
+}
+
+func WarnContext(ctx context.Context, msg string, args ...any) {
+	logAt(ctx, slog.LevelWarn, msg, args...)
+}
+
+func ErrorContext(ctx context.Context, msg string, args ...any) {
+	logAt(ctx, slog.LevelError, msg, args...)
 }
 
 func Log(ctx context.Context, level slog.Level, msg string, args ...any) {
@@ -256,12 +368,24 @@ func getHandler(config *LogConfig) slog.Handler {
 		Level:       getLevel(config.Level),
 		ReplaceAttr: config.getReplaceAttr(),
 	}
+	var baseHandler slog.Handler
 	switch config.OutputType {
 	case OutputTypeJSON:
-		return slog.NewJSONHandler(os.Stdout, &options)
+		baseHandler = slog.NewJSONHandler(os.Stdout, &options)
 	case OutputTypeText:
-		return slog.NewTextHandler(os.Stdout, &options)
+		baseHandler = slog.NewTextHandler(os.Stdout, &options)
 	default:
-		return slog.NewTextHandler(os.Stdout, &options)
+		baseHandler = slog.NewTextHandler(os.Stdout, &options)
+	}
+
+	extractor := config.RequestIDExtractor
+	if extractor == nil {
+		extractor = DefaultRequestIDExtractor
+	}
+
+	return &contextHandler{
+		handler:   baseHandler,
+		extractor: extractor,
 	}
 }
+

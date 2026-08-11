@@ -7,7 +7,6 @@ A lightweight, high-performance set of backend utilities for Go applications, pr
 ## Table of Contents
 - [Packages](#packages)
   - [`log` - Structured Logging Package](#log---structured-logging-package)
-  - [`tools` - Generic Number Utilities](#tools---generic-number-utilities)
 - [Installation](#installation)
 - [Testing](#testing)
 
@@ -17,16 +16,20 @@ A lightweight, high-performance set of backend utilities for Go applications, pr
 
 ### `log` - Structured Logging Package
 
-The `log` package provides lock-free global logging functions (`logger.Info`, `logger.Debug`, `logger.Error`) as well as constructors for creating isolated custom loggers (`logger.New(...)`).
+The `log` package provides lock-free global logging functions (`logger.Info`, `logger.Debug`, `logger.Error`), context-aware logging (`logger.InfoContext`, `logger.Log`), Request ID HTTP middleware (`logger.RequestIDMiddleware`), as well as constructors for creating isolated custom loggers (`logger.New(...)`).
 
 #### Features
 - **Global Convenience Functions**: Log anywhere in your app via `logger.Info()`, `logger.Debug()`, `logger.Warn()`, `logger.Error()`.
+- **Context-Aware Logging**: Log with context via `logger.InfoContext(ctx, ...)`, `logger.DebugContext(ctx, ...)`, `logger.WarnContext(ctx, ...)`, `logger.ErrorContext(ctx, ...)`.
+- **Request ID Life Cycle & Middleware**: HTTP middleware (`logger.RequestIDMiddleware`) that extracts or generates a unique Request ID (UUID v4), injects it into `context.Context`, and sets `X-Request-ID` in HTTP response headers.
+- **Automatic Request ID Log Injection**: `log/slog` handlers automatically extract `request_id` from `context.Context` and append it to all log entries (including database query logs via GORM logger).
+- **Customizable Request ID Extractor**: Configure custom context keys or framework extractors via `logger.WithRequestIDExtractor(...)`.
 - **Lock-Free Atomic Global State**: Global logger reads use lock-free `atomic.Pointer` for maximum performance.
 - **Isolated Custom Loggers**: Constructing custom loggers via `logger.New(...)` (e.g., JSON loggers for Kibana) **never touches or interferes with** the global default logger.
 - **Accurate Caller Depth**: Package-level log wrappers accurately report caller source line numbers (`main.go:20` instead of wrapper file lines).
 - **Customizable Source Formatting**: Formats source file paths relative to the project working directory without leading slashes and caps path depth to configurable limits (e.g. `log/logger.go:127`).
 
-#### Usage Example
+#### Basic Usage Example
 
 ```go
 package main
@@ -70,6 +73,38 @@ func main() {
 }
 ```
 
+#### Request Life Cycle & Middleware Example
+
+```go
+package main
+
+import (
+	"net/http"
+
+	logger "github.com/duel80003/backend-tools/log"
+)
+
+func main() {
+	// Initialize global logger with JSON output
+	logger.LoggerInit(logger.WithOutputType(logger.OutputTypeJSON))
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		// Output log automatically includes request_id from ctx:
+		// {"time":"...","level":"INFO","msg":"fetching users","request_id":"c6f3796d-..."}
+		logger.InfoContext(ctx, "fetching users")
+
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// Wrap server with RequestIDMiddleware
+	http.ListenAndServe(":8080", logger.RequestIDMiddleware(mux))
+}
+```
+
 ---
 
 ### `tools` - Generic Number Utilities
@@ -89,7 +124,7 @@ package main
 import (
 	"fmt"
 
-	"backend-tools/tools"
+	"github.com/duel80003/backend-tools/tools"
 )
 
 func main() {
@@ -122,8 +157,8 @@ Ensure Go 1.21+ is installed, then import packages into your project:
 
 ```go
 import (
-	"backend-tools/log"
-	"backend-tools/tools"
+	"github.com/duel80003/backend-tools/log"
+	"github.com/duel80003/backend-tools/tools"
 )
 ```
 
@@ -136,3 +171,4 @@ Run all unit tests across the repository:
 ```bash
 go test -v -cover ./...
 ```
+
